@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Manage per-owner GitHub tokens in the sandbox. One fine-grained token per repo owner,
+# stored as ~/.config/gh-tokens/<owner>. The gh wrapper and the git credential helper
+# pick the token by the owner of the repo being touched, so nothing needs switching.
+set -euo pipefail
+
+DIR="$HOME/.config/gh-tokens"
+usage() {
+  cat >&2 <<EOF
+usage: gh-token add <owner>     read a token from stdin (or a prompt) and store it
+       gh-token rm <owner>
+       gh-token list
+EOF
+  exit 2
+}
+
+[ $# -ge 1 ] || usage
+cmd=$1; shift
+mkdir -p "$DIR"; chmod 700 "$DIR"
+
+case "$cmd" in
+  add)
+    [ $# -eq 1 ] || usage
+    owner=$(tr '[:upper:]' '[:lower:]' <<<"$1")
+    if [ -t 0 ]; then
+      read -r -s -p "token for $owner: " token; echo >&2
+    else
+      read -r token
+    fi
+    [ -n "$token" ] || { echo "gh-token: empty token" >&2; exit 1; }
+    (umask 077; printf '%s\n' "$token" > "$DIR/$owner")
+    echo "gh-token: stored token for $owner"
+    ;;
+  rm)
+    [ $# -eq 1 ] || usage
+    rm -f "$DIR/$(tr '[:upper:]' '[:lower:]' <<<"$1")"
+    ;;
+  list)
+    ls -1 "$DIR" 2>/dev/null || true
+    ;;
+  *) usage ;;
+esac

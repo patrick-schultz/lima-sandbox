@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Regenerate agent config in the guest from the read-only ~/.agents mount.
+# Runs at every boot (user provisioning) and on demand after editing the host files.
+set -euo pipefail
+
+A="$HOME/.agents"
+C="$HOME/.claude"
+X="$HOME/.codex"
+
+[ -d "$A" ] || { echo "sandbox-sync: $A is not mounted" >&2; exit 1; }
+mkdir -p "$C" "$X/skills"
+
+# Claude settings: host settings.json with the sandbox overlay deep-merged on top.
+# jq's * merges objects recursively; arrays in the overlay replace the base array.
+jq -s '.[0] * .[1]' "$A/claude/settings.json" "$A/claude/settings-sandbox.json" > "$C/settings.json.tmp"
+mv "$C/settings.json.tmp" "$C/settings.json"
+
+# Instructions: global AGENTS.md followed by the sandbox additions, for both tools.
+# Claude reads the user-level file as ~/.claude/CLAUDE.md; its AGENTS.md fallback only
+# walks parents of the working directory, and the guest home is not one of them.
+{ cat "$A/AGENTS.md"; echo; cat "$A/AGENTS-sandbox.md"; } > "$C/CLAUDE.md.tmp"
+mv "$C/CLAUDE.md.tmp" "$C/CLAUDE.md"
+cp "$C/CLAUDE.md" "$X/AGENTS.md"
+
+# Codex config: full sandbox file, not a merge.
+install -m 0600 "$A/codex/config-sandbox.toml" "$X/config.toml"
+
+# Codex reads user skills from ~/.codex/skills only. Link every shared skill, drop stale links.
+for skill in "$A"/skills/*/; do
+  name=$(basename "$skill")
+  ln -sfn "../../.agents/skills/$name" "$X/skills/$name"
+done
+for link in "$X"/skills/*; do
+  [ -L "$link" ] && [ ! -e "$link" ] && rm -f "$link"
+done
+
+echo "sandbox-sync: updated ~/.claude/{settings.json,CLAUDE.md} ~/.codex/{AGENTS.md,config.toml,skills}"

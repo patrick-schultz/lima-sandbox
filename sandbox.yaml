@@ -1,0 +1,75 @@
+# Lima VM: sandbox for coding agents (Claude Code, Codex) and Rust cross builds.
+# Rendered by bin/apply, which inlines the `file:` references below. Do not pass this
+# file to limactl directly.
+
+minimumLimaVersion: 2.0.0
+
+vmType: vz
+arch: aarch64
+
+# Ubuntu 24.04 LTS, copied from lima's _images/ubuntu-24.04.yaml (arm64 entries only).
+images:
+- location: "https://cloud-images.ubuntu.com/releases/noble/release-20260705/ubuntu-24.04-server-cloudimg-arm64.img"
+  arch: "aarch64"
+  digest: "sha256:7df0201546f75b8bcc1044594c806c35749421ad3c9bc1be2a3ab806cfae39cc"
+  variant: "server"
+- location: https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-server-cloudimg-arm64.img
+  arch: aarch64
+  variant: "server"
+
+cpus: 8
+memory: 16GiB
+disk: 100GiB
+
+# Whitelist of host directories. Projects mount at their host path so jj, editor
+# workspaces and cargo lockfiles see identical paths on both sides.
+# ~/.agents holds agent config and skills; it is read-only and mounts at the guest home.
+mountType: virtiofs
+mounts:
+- location: "~/dev/datafusion-sandbox"
+  writable: true
+- location: "~/dev/vortex"
+  writable: true
+- location: "~/.agents"
+  mountPoint: "{{.Home}}/.agents"
+  writable: false
+
+containerd:
+  system: false
+  user: false
+
+vmOpts:
+  vz:
+    rosetta:
+      enabled: true
+      binfmt: true
+
+ssh:
+  forwardAgent: false
+
+provision:
+- mode: system
+  file: provision/system.sh
+- mode: data
+  path: /usr/local/bin/sandbox-sync
+  file: guest/sandbox-sync
+  owner: "root:root"
+  permissions: 755
+- mode: data
+  path: /usr/local/bin/gh-token
+  file: guest/gh-token
+  owner: "root:root"
+  permissions: 755
+- mode: data
+  path: /usr/local/bin/git-credential-sandbox
+  file: guest/git-credential-sandbox
+  owner: "root:root"
+  permissions: 755
+# Shadows /usr/bin/gh: /usr/local/bin comes first on PATH.
+- mode: data
+  path: /usr/local/bin/gh
+  file: guest/gh
+  owner: "root:root"
+  permissions: 755
+- mode: user
+  file: provision/user.sh

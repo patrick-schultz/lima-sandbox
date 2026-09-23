@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# gh wrapper: sets GH_TOKEN from ~/.config/gh-tokens/<owner> before running the real gh.
+# The owner comes from -R/--repo if given, otherwise from the origin remote of the current
+# directory. With no matching token, gh runs unauthenticated (public read-only).
+set -euo pipefail
+REAL_GH=/usr/bin/gh
+
+if [ -n "${GH_TOKEN:-}" ] || [ -n "${GITHUB_TOKEN:-}" ]; then
+  exec "$REAL_GH" "$@"
+fi
+
+owner_from_url() {
+  # https://github.com/owner/repo(.git) | git@github.com:owner/repo(.git) | owner/repo
+  local s=$1
+  s=${s#*github.com/}; s=${s#*github.com:}
+  s=${s#/}
+  printf '%s' "${s%%/*}"
+}
+
+owner=""
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case "${args[i]}" in
+    -R|--repo) owner=$(owner_from_url "${args[i+1]:-}"); break ;;
+    --repo=*)  owner=$(owner_from_url "${args[i]#--repo=}"); break ;;
+  esac
+done
+
+if [ -z "$owner" ]; then
+  url=$(git remote get-url origin 2>/dev/null || jj --no-pager git remote list 2>/dev/null | awk '$1=="origin"{print $2}' || true)
+  [ -n "$url" ] && owner=$(owner_from_url "$url")
+fi
+
+if [ -n "$owner" ]; then
+  file="$HOME/.config/gh-tokens/$(tr '[:upper:]' '[:lower:]' <<<"$owner")"
+  [ -f "$file" ] && export GH_TOKEN="$(head -n1 "$file")"
+fi
+
+exec "$REAL_GH" "$@"

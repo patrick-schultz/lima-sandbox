@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Create the sandbox VM, or apply changes to sandbox.yaml to the existing one.
+# Provisioning scripts run on every boot, so package and config changes take effect on restart.
+# Resource or image changes need `limactl delete sandbox` first.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+NAME=sandbox
+LIMA_HOME="${LIMA_HOME:-$HOME/.lima}"
+
+command -v yq >/dev/null || { echo "apply: yq is required (brew install yq)" >&2; exit 1; }
+command -v limactl >/dev/null || { echo "apply: limactl is required (brew install lima)" >&2; exit 1; }
+
+# Host sanity: the guest merges its config from ~/.agents, which only works while the host
+# tools still read their config through these symlinks.
+for f in "$HOME/.claude/settings.json" "$HOME/.codex/config.toml"; do
+  [ -L "$f" ] || echo "apply: warning: $f is not a symlink into ~/.agents; the sandbox base config may be stale" >&2
+done
+
+# Render: inline every provision `file:` reference so the result is self-contained.
+mkdir -p build
+yq '
+  with(.provision[] | select(has("file") and .mode == "data"); .content = load_str(.file) | del(.file)) |
+  with(.provision[] | select(has("file"));                     .script  = load_str(.file) | del(.file))
+' sandbox.yaml > build/lima.yaml
+
+# Host ssh config: make `ssh lima-sandbox` work for Zed, T3 Code, and plain ssh.
+mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
+touch "$HOME/.ssh/config"
+if ! grep -qF "lima/$NAME/ssh.config" "$HOME/.ssh/config"; then
+  { printf 'Include ~/.lima/%s/ssh.config\n' "$NAME"; cat "$HOME/.ssh/config"; } > "$HOME/.ssh/config.tmp"
+  mv "$HOME/.ssh/config.tmp" "$HOME/.ssh/config"
+  chmod 600 "$HOME/.ssh/config"
+fi
+
+if limactl list -q 2>/dev/null | grep -qx "$NAME"; then
+  status=$(limactl list --format '{{.Status}}' "$NAME")
+  [ "$status" = "Stopped" ] || limactl stop "$NAME"
+  cp build/lima.yaml "$LIMA_HOME/$NAME/lima.yaml"
+  limactl start --tty=false "$NAME"
+else
+  limactl start --tty=false --name "$NAME" build/lima.yaml
+  # First boot: provisioning switched the login shell to fish, but Lima's persistent ssh
+  # control connection was opened before that and its sessions keep the old shell.
+  # One restart makes every session, including `limactl shell`, land in fish.
+  limactl stop "$NAME"
+  limactl start --tty=false "$NAME"
+fi
+
+echo
+echo "apply: $NAME is up. Enter with: limactl shell $NAME   or   ssh lima-$NAME"
