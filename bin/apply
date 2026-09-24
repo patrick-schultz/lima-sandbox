@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Create the sandbox VM, or apply changes to sandbox.yaml to the existing one.
 # Provisioning scripts run on every boot, so package and config changes take effect on restart.
-# Resource or image changes need `limactl delete sandbox` first.
+# CPU and memory changes also take effect on restart. Image changes need `limactl delete sandbox` first.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

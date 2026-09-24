@@ -23,9 +23,14 @@ if [ ! -f /etc/apt/sources.list.d/nodesource.list ]; then
 fi
 
 # --- packages ---------------------------------------------------------------
+# The gh package installs to /usr/bin/gh.real, so /usr/bin/gh can be the per-owner token wrapper.
+# Putting the wrapper first on PATH is not enough: Zed starts agents with /usr/bin at the front.
+# The diversion must exist before apt installs gh, and it survives gh upgrades.
+dpkg-divert --local --rename --divert /usr/bin/gh.real --add /usr/bin/gh
+
 apt-get update
 apt-get install -y --no-install-recommends \
-  build-essential cmake pkg-config libssl-dev clang lld \
+  build-essential cmake pkg-config libssl-dev clang lld mold \
   gcc-x86-64-linux-gnu g++-x86-64-linux-gnu \
   git gh curl ca-certificates gnupg unzip \
   fish tmux vim ripgrep fd-find jq \
@@ -33,14 +38,39 @@ apt-get install -y --no-install-recommends \
   nodejs
 
 ln -sfn "$(command -v fdfind)" /usr/local/bin/fd
+ln -sfn /usr/local/bin/gh /usr/bin/gh
+
+# Cargo's `linker` setting takes a program, not arguments, so these wrappers select mold.
+# Setting the linker this way, rather than in rustflags, survives a RUSTFLAGS override and
+# leaves each project's own rustflags alone. The cross gcc looks for a target-prefixed
+# ld.mold under -fuse-ld=mold, so it gets mold's `ld` directory with -B instead.
+printf '#!/bin/sh\nexec cc -fuse-ld=mold "$@"\n' > /usr/local/bin/cc-mold
+printf '#!/bin/sh\nexec x86_64-linux-gnu-gcc -B/usr/libexec/mold "$@"\n' > /usr/local/bin/x86_64-linux-gnu-cc-mold
+chmod 755 /usr/local/bin/cc-mold /usr/local/bin/x86_64-linux-gnu-cc-mold
+
+# --- swap ---------------------------------------------------------------------
+# Parallel links of large test binaries can briefly exceed guest memory. Swap turns that into
+# a slowdown instead of the OOM killer taking out ld or rust-analyzer.
+if [ ! -f /swapfile ]; then
+  fallocate -l 8G /swapfile
+  chmod 600 /swapfile
+  mkswap /swapfile
+fi
+swapon --show=NAME --noheadings | grep -qx /swapfile || swapon /swapfile
 
 # --- x86-64 runtime for Rosetta ---------------------------------------------
 # Rosetta runs x86-64 ELF binaries, but they need an x86-64 dynamic loader at /lib64 and
 # glibc/libstdc++ in the x86-64 multiarch dir. The cross gcc packages ship these under
 # /usr/x86_64-linux-gnu/lib; ldconfig misclassifies them as AArch64, so symlink them instead.
 # /lib/x86_64-linux-gnu already exists (binutils-x86-64-linux-gnu puts ldscripts there).
-install -d /lib64 /lib/x86_64-linux-gnu
-ln -sfn /usr/x86_64-linux-gnu/lib/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2
+# /lib64 must be a symlink into /usr, as on amd64 Ubuntu: a real /lib64 directory makes the
+# systemd and udev packages refuse to upgrade because the system is no longer merged-/usr.
+install -d /usr/lib64 /lib/x86_64-linux-gnu
+if [ -d /lib64 ] && [ ! -L /lib64 ]; then
+  rm -rf /lib64
+fi
+ln -sfn usr/lib64 /lib64
+ln -sfn /usr/x86_64-linux-gnu/lib/ld-linux-x86-64.so.2 /usr/lib64/ld-linux-x86-64.so.2
 for f in /usr/x86_64-linux-gnu/lib/*.so*; do
   ln -sfn "$f" "/lib/x86_64-linux-gnu/$(basename "$f")"
 done

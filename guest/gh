@@ -3,7 +3,7 @@
 # The owner comes from -R/--repo if given, otherwise from the origin remote of the current
 # directory. With no matching token, gh runs unauthenticated (public read-only).
 set -euo pipefail
-REAL_GH=/usr/bin/gh
+REAL_GH=/usr/bin/gh.real
 
 if [ -n "${GH_TOKEN:-}" ] || [ -n "${GITHUB_TOKEN:-}" ]; then
   exec "$REAL_GH" "$@"

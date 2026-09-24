@@ -65,7 +65,7 @@ provision:
   file: guest/git-credential-sandbox
   owner: "root:root"
   permissions: 755
-# Shadows /usr/bin/gh: /usr/local/bin comes first on PATH.
+# system.sh diverts the real gh to /usr/bin/gh.real and links /usr/bin/gh here.
 - mode: data
   path: /usr/local/bin/gh
   file: guest/gh

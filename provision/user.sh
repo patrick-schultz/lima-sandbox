@@ -66,8 +66,12 @@ cat > "$HOME/.cargo/config.toml" <<'EOF'
 [build]
 target-dir = ".cargo-target"
 
+# Link with mold through the wrappers from system.sh.
+[target.aarch64-unknown-linux-gnu]
+linker = "cc-mold"
+
 [target.x86_64-unknown-linux-gnu]
-linker = "x86_64-linux-gnu-gcc"
+linker = "x86_64-linux-gnu-cc-mold"
 
 # cc-rs and cmake-rs pick these up for C/C++ dependencies when cross compiling.
 [env]

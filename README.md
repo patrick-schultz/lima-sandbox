@@ -4,17 +4,18 @@ A Lima VM that sandboxes coding agents (Claude Code, Codex) and cross-compiles R
 The VM is the safety boundary: agents run inside it with permission prompts off, and only the
 directories listed in `sandbox.yaml` are visible.
 
-Ubuntu 24.04 arm64 under vz, 8 CPUs, 16 GiB, 100 GiB sparse disk, Rosetta binfmt on, no containerd.
+Ubuntu 24.04 arm64 under vz, 8 CPUs, 16 GiB + 8 GiB swap, 100 GiB sparse disk, Rosetta binfmt on,
+no containerd.
 
 ## Layout
 
 | Path | Purpose |
 | --- | --- |
 | `sandbox.yaml` | Lima template. Mounts, resources, and provision steps that reference the files below. |
-| `provision/system.sh` | Root provisioning: apt packages, cross gcc, gh, Node, jj, codex, pyright, fish as login shell. |
+| `provision/system.sh` | Root provisioning: apt packages, cross gcc, mold, gh, Node, jj, codex, pyright, swap, fish as login shell. |
 | `provision/user.sh` | User provisioning: fish and jj config, rustup (nightly default + stable, x86_64 target), cargo config, uv, claude, agent config symlinks. |
 | `guest/sandbox-sync` | Installed at `/usr/local/bin/sandbox-sync` in the guest. Regenerates agent config from `~/.agents`. |
-| `guest/gh`, `guest/gh-token`, `guest/git-credential-sandbox` | Installed in `/usr/local/bin`. Per-owner GitHub token selection, see below. |
+| `guest/gh`, `guest/gh-token`, `guest/git-credential-sandbox` | Installed in `/usr/local/bin`, with `/usr/bin/gh` linked to the `gh` wrapper. Per-owner GitHub token selection, see below. |
 | `bin/apply` | Renders the template and creates or updates the VM. Also adds the ssh `Include` on the host. |
 
 Provision scripts run on every boot and are idempotent.
@@ -67,11 +68,26 @@ Fine-grained tokens are scoped to one resource owner, so the VM keeps one token 
 
 - `git` and `jj git push` ask the `git-credential-sandbox` helper, which reads the owner from the
   repo path in the URL.
-- `gh` is a wrapper at `/usr/local/bin/gh` that sets `GH_TOKEN` from the owner in `-R owner/repo`
-  or, failing that, the origin remote of the current directory, then runs the real gh.
+- `gh` is a wrapper that sets `GH_TOKEN` from the owner in `-R owner/repo` or, failing that, the
+  origin remote of the current directory, then runs the real gh. The gh package is diverted to
+  `/usr/bin/gh.real` and `/usr/bin/gh` links to the wrapper, so it wins whatever the PATH order.
+  Zed, for one, starts agents with `/usr/bin` at the front of PATH.
 - `gh-token list` shows which owners have a token. `gh-token rm <owner>` removes one.
 
 No `gh auth login` is needed or wanted. With no matching token, gh runs unauthenticated.
+
+### Linking and memory
+
+Cargo links with mold for both aarch64 and x86_64, through the `cc-mold` and
+`x86_64-linux-gnu-cc-mold` wrappers named in `~/.cargo/config.toml`. Selecting the linker there
+rather than in rustflags keeps working when `RUSTFLAGS` is set and leaves project rustflags alone.
+
+mold is here for speed. On the datafusion-sandbox test binaries, one link takes about a second with
+mold against 20 to 60 seconds with GNU ld, and uses about the same memory, roughly 3 GB. Because the
+links finish quickly, they rarely overlap. A `cargo test` rebuild of that crate at default
+parallelism took 20 seconds and peaked at 5.5 GB with mold, against 2.5 minutes and 20.6 GB with GNU
+ld. Before the VM had swap, that GNU ld peak got ld and rust-analyzer OOM-killed. The 8 GiB swapfile
+covers the spikes that remain, so they slow the build down instead of killing processes.
 
 ### x86_64 builds
 
