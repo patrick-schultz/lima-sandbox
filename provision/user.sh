@@ -80,6 +80,12 @@ CXX_x86_64_unknown_linux_gnu = "x86_64-linux-gnu-g++"
 AR_x86_64_unknown_linux_gnu = "x86_64-linux-gnu-ar"
 EOF
 
+# cargo-binstall fetches prebuilt release binaries into ~/.cargo/bin. It is https-only by default
+# and verifies signatures when the crate publishes them; the old --secure flag is a no-op.
+command -v cargo-binstall >/dev/null || curl -L --proto '=https' --tlsv1.2 -sSf \
+  https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+command -v cargo-nextest >/dev/null || cargo binstall cargo-nextest --no-confirm
+
 # --- uv, claude ----------------------------------------------------------------------
 command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
 command -v claude >/dev/null || curl -fsSL https://claude.ai/install.sh | bash
