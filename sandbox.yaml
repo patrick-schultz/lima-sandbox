@@ -33,6 +33,17 @@ mounts:
 - location: "~/.agents"
   mountPoint: "{{.Home}}/.agents"
   writable: false
+# Agent transcripts live on the host so they survive the VM and feed retrospectives.
+# Dedicated dirs, not the host's own ~/.claude/projects, which would expose every host session.
+- location: "~/.agent-transcripts/sandbox/claude-projects"
+  mountPoint: "{{.Home}}/.claude/projects"
+  writable: true
+- location: "~/.agent-transcripts/sandbox/codex-sessions"
+  mountPoint: "{{.Home}}/.codex/sessions"
+  writable: true
+- location: "~/.agent-transcripts/sandbox/codex-archived-sessions"
+  mountPoint: "{{.Home}}/.codex/archived_sessions"
+  writable: true
 
 containerd:
   system: false

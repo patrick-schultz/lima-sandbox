@@ -17,6 +17,9 @@ for f in "$HOME/.claude/settings.json" "$HOME/.codex/config.toml"; do
   [ -L "$f" ] || echo "apply: warning: $f is not a symlink into ~/.agents; the sandbox base config may be stale" >&2
 done
 
+# Host side of the transcript mounts in sandbox.yaml.
+mkdir -p "$HOME/.agent-transcripts/sandbox/"{claude-projects,codex-sessions,codex-archived-sessions}
+
 # Render: inline every provision `file:` reference so the result is self-contained.
 mkdir -p build
 yq '

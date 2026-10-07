@@ -35,6 +35,22 @@ via symlinks, so the sandbox sees the same base config as the host.
 
 After editing any of these on the host, run `sandbox-sync` inside the VM. It also runs at boot.
 
+## Agent transcripts
+
+Session transcripts are written through writable mounts to `~/.agent-transcripts/sandbox/` on the
+host, so they outlive the VM and can be analysed alongside host sessions. `bin/apply` creates the
+host directories.
+
+| Host dir | Guest dir |
+| --- | --- |
+| `claude-projects` | `~/.claude/projects` |
+| `codex-sessions` | `~/.codex/sessions` |
+| `codex-archived-sessions` | `~/.codex/archived_sessions` |
+
+These are dedicated directories, not the host's own `~/.claude/projects` or `~/.codex/sessions`, so
+the sandbox never sees host sessions. Codex's SQLite state stays on the VM disk; the `.jsonl` rollouts
+are the complete record. Transcripts are written inside the sandbox, so treat them as untrusted input.
+
 ## Usage
 
 ```
