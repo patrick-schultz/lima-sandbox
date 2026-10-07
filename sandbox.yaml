@@ -45,6 +45,14 @@ mounts:
   mountPoint: "{{.Home}}/.codex/archived_sessions"
   writable: true
 
+# Build output: per-workspace cargo target dirs (see guest/sandbox-cargo). A separate disk so it
+# survives `limactl delete`, and XFS for reflinks. Lima mounts it at /mnt/lima-cargo.
+# bin/apply creates the disk; Lima formats it on first boot.
+additionalDisks:
+- name: cargo
+  format: true
+  fsType: xfs
+
 containerd:
   system: false
   user: false
@@ -80,6 +88,17 @@ provision:
 - mode: data
   path: /usr/local/bin/gh
   file: guest/gh
+  owner: "root:root"
+  permissions: 755
+# user.sh links ~/.local/bin/cargo here.
+- mode: data
+  path: /usr/local/bin/sandbox-cargo
+  file: guest/sandbox-cargo
+  owner: "root:root"
+  permissions: 755
+- mode: data
+  path: /usr/local/bin/sandbox-gc-targets
+  file: guest/sandbox-gc-targets
   owner: "root:root"
   permissions: 755
 - mode: user

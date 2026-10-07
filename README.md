@@ -4,8 +4,8 @@ A Lima VM that sandboxes coding agents (Claude Code, Codex) and cross-compiles R
 The VM is the safety boundary: agents run inside it with permission prompts off, and only the
 directories listed in `sandbox.yaml` are visible.
 
-Ubuntu 24.04 arm64 under vz, 8 CPUs, 16 GiB + 8 GiB swap, 100 GiB sparse disk, Rosetta binfmt on,
-no containerd.
+Ubuntu 24.04 arm64 under vz, 8 CPUs, 16 GiB + 8 GiB swap, 100 GiB sparse disk plus a 150 GiB XFS
+disk for build output, Rosetta binfmt on, no containerd.
 
 ## Layout
 
@@ -13,10 +13,11 @@ no containerd.
 | --- | --- |
 | `sandbox.yaml` | Lima template. Mounts, resources, and provision steps that reference the files below. |
 | `provision/system.sh` | Root provisioning: apt packages, cross gcc, mold, gh, Node, jj, codex, pyright, swap, fish as login shell. |
-| `provision/user.sh` | User provisioning: fish and jj config, rustup (nightly default + stable, x86_64 target), cargo config, cargo-binstall, cargo-nextest, uv, claude, agent config symlinks. |
+| `provision/user.sh` | User provisioning: fish and jj config, rustup (nightly default + stable, x86_64 target), cargo config, cargo wrapper link, kache and its daemon, cargo-binstall, cargo-nextest, uv, claude, agent config symlinks. |
 | `guest/sandbox-sync` | Installed at `/usr/local/bin/sandbox-sync` in the guest. Regenerates agent config from `~/.agents`. |
+| `guest/sandbox-cargo`, `guest/sandbox-gc-targets` | Installed in `/usr/local/bin`, with `~/.local/bin/cargo` linked to the wrapper. Per-workspace target dirs, see below. |
 | `guest/gh`, `guest/gh-token`, `guest/git-credential-sandbox` | Installed in `/usr/local/bin`, with `/usr/bin/gh` linked to the `gh` wrapper. Per-owner GitHub token selection, see below. |
-| `bin/apply` | Renders the template and creates or updates the VM. Also adds the ssh `Include` on the host. |
+| `bin/apply` | Renders the template and creates or updates the VM. Also creates the `cargo` disk and adds the ssh `Include` on the host. |
 
 Provision scripts run on every boot and are idempotent.
 
@@ -61,7 +62,7 @@ limactl stop sandbox
 ```
 
 Mounted projects appear at their host paths, e.g. `/Users/pschulz/dev/datafusion-sandbox`.
-Cargo builds go to `~/.cargo-target` in the guest, never to `target/` on the mount.
+Cargo builds go to a per-workspace dir under `/mnt/lima-cargo/target`, never to `target/` on the mount.
 
 ### Adding a project
 
@@ -92,6 +93,48 @@ Fine-grained tokens are scoped to one resource owner, so the VM keeps one token 
 
 No `gh auth login` is needed or wanted. With no matching token, gh runs unauthenticated.
 
+### Target dirs
+
+Each cargo workspace builds into its own `/mnt/lima-cargo/target/<basename>-<hash of path>`, for
+example `ws1-54cbfd3e`. The `cargo` wrapper picks the dir from `cargo locate-project --workspace`
+and exports `CARGO_TARGET_DIR`; an existing `CARGO_TARGET_DIR` wins. `SANDBOX_TARGET_SUFFIX=<s>`
+appends `-<s>`, for builds that should not share a dir, such as different `RUSTFLAGS`.
+
+A shared target dir is unsafe for several workspaces of one project. Cargo's output paths do not
+depend on the checkout path, so one workspace's build overwrites the other's binaries, and an
+agent ends up testing someone else's code. That happened to datafusion-sandbox's ws1 and ws2.
+
+The wrapper writes the workspace path to `.workspace` in each dir. `sandbox-gc-targets` runs at
+boot and deletes dirs whose workspace is gone, such as finished agent worktrees; `-n` lists them
+without deleting. It keeps a dir when the workspace's parent is also missing, as with an unmounted
+project.
+
+`/mnt/lima-cargo` is the `cargo` Lima disk: sparse, XFS with reflinks, and kept by
+`limactl delete`. `limactl disk resize cargo --size <N>GiB` grows it while the VM is stopped.
+
+For rust-analyzer, set `cargo.targetDir = true` in the editor or project config. It then checks
+into a `rust-analyzer` subdir and does not wait on the build-dir lock behind agent builds.
+
+### Build cache
+
+[kache](https://github.com/kunobi-ninja/kache) is cargo's `rustc-wrapper`, so per-workspace target
+dirs do not mean rebuilding every dependency. Its keys ignore the checkout path, so a fresh
+workspace fills from the other workspaces' outputs. On datafusion-sandbox a fresh workspace's
+first `nextest --no-run` takes 39 s instead of 202 s. The store is `/mnt/lima-cargo/kache`, on the
+same XFS disk as the target dirs, so restores are reflink clones. It is capped at 60 GiB.
+
+- `user.sh` pins the version and sha256. Bump both together, deliberately.
+- `cache_executables = false`: storing each relinked 700–800 MB test binary slowed concurrent edit
+  loops more every round, and mold relinks them in about a second.
+- The `kache.service` user unit runs the daemon. It seeds new target dirs, runs GC, and removes
+  target dirs whose workspace was deleted at least a day ago.
+- `KACHE_DISABLED=1` bypasses it for one command. Hardlinked outputs are read-only, so use a
+  separate target dir (`SANDBOX_TARGET_SUFFIX=nokache`) for builds without kache.
+- `kache stats --last-build`, `kache doctor`, `kache targets`. doctor's "Link layout: EXDEV"
+  warning is a false alarm here: it compares against the workspace on the mount, not
+  `CARGO_TARGET_DIR`.
+- mold's version is not part of the key; set `KACHE_KEY_SALT` in the config when bumping mold.
+
 ### Linking and memory
 
 Cargo links with mold for both aarch64 and x86_64, through the `cc-mold` and
@@ -112,7 +155,7 @@ cargo build -r --target x86_64-unknown-linux-gnu
 ```
 
 For a GCE family, take the flags from `python3 python/src/hailtools/gce.py flags <family>` and set
-`RUSTFLAGS` plus a family-specific `CARGO_TARGET_DIR` under `~/.cargo-target/`. Binaries link
+`RUSTFLAGS` plus `SANDBOX_TARGET_SUFFIX=<family>`. Binaries link
 against glibc 2.39; if the GCE image is older, add cargo-zigbuild.
 
 Without `RUSTFLAGS`, the project's `-Ctarget-cpu=native` resolves to the arm64 host CPU and rustc
@@ -124,4 +167,5 @@ has no AVX-512, and timings under it mean nothing.
 
 ## Rebuilding from scratch
 
-`limactl delete sandbox && bin/apply`. This loses agent logins, the GitHub token, and the cargo cache.
+`limactl delete sandbox && bin/apply`. This loses agent logins, the GitHub token, and the cargo
+registry cache. Target dirs survive on the `cargo` disk; `limactl disk delete cargo` drops them too.

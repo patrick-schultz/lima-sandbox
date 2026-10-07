@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Delete per-workspace cargo target dirs whose workspace no longer exists.
+# Runs at every boot (user provisioning) and on demand; -n lists what would go.
+# A dir is kept when the workspace's parent is missing too, which is what an unmounted project
+# looks like, and when it has no .workspace file, i.e. sandbox-cargo did not make it.
+set -euo pipefail
+ROOT=/mnt/lima-cargo/target
+dry_run=false
+[ "${1:-}" = "-n" ] && dry_run=true
+
+[ -d "$ROOT" ] || exit 0
+for dir in "$ROOT"/*/; do
+  dir=${dir%/}
+  [ -f "$dir/.workspace" ] || continue
+  ws=$(head -n1 "$dir/.workspace")
+  [ -n "$ws" ] && [ ! -e "$ws" ] && [ -d "$(dirname "$ws")" ] || continue
+  echo "sandbox-gc-targets: removing $dir ($ws is gone)"
+  $dry_run || rm -rf -- "$dir"
+done

@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# cargo wrapper: gives every cargo workspace its own target dir on the build-output disk.
+# Cargo's output names do not depend on the checkout path, so with one shared target dir two
+# workspaces of a project overwrite each other's binaries. user.sh links ~/.local/bin/cargo here,
+# ahead of the rustup proxy in ~/.cargo/bin.
+#
+# The dir is /mnt/lima-cargo/target/<workspace basename>-<hash of workspace path>, plus
+# -$SANDBOX_TARGET_SUFFIX when that is set. A CARGO_TARGET_DIR that is already set wins, which
+# also covers cargo invoked from inside a build.
+set -euo pipefail
+REAL_CARGO="$HOME/.cargo/bin/cargo"
+ROOT=/mnt/lima-cargo/target
+
+[ -z "${CARGO_TARGET_DIR:-}" ] || exec "$REAL_CARGO" "$@"
+
+# locate-project must see the same toolchain and manifest as the real command. Arguments after
+# `--` belong to the program being run, not to cargo.
+toolchain=()
+manifest=()
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case "${args[i]}" in
+    +*) [ "$i" -eq 0 ] && toolchain=("${args[i]}") ;;
+    --manifest-path) manifest=(--manifest-path "${args[i+1]:-}"); break ;;
+    --manifest-path=*) manifest=("${args[i]}"); break ;;
+    --) break ;;
+  esac
+done
+
+# Outside a cargo workspace (cargo new, cargo install, ...) there is nothing to place.
+manifest_file=$("$REAL_CARGO" "${toolchain[@]}" locate-project --workspace --message-format plain \
+  "${manifest[@]}" 2>/dev/null) || exec "$REAL_CARGO" "$@"
+ws=$(dirname "$manifest_file")
+
+[ -d "$ROOT" ] || { echo "cargo: $ROOT is missing; is the cargo disk mounted?" >&2; exit 1; }
+dir="$ROOT/$(basename "$ws")-$(printf '%s' "$ws" | sha256sum | cut -c1-8)${SANDBOX_TARGET_SUFFIX:+-$SANDBOX_TARGET_SUFFIX}"
+mkdir -p "$dir"
+# sandbox-gc-targets deletes the dir once this workspace is gone.
+[ "$(cat "$dir/.workspace" 2>/dev/null)" = "$ws" ] || printf '%s\n' "$ws" > "$dir/.workspace"
+
+export CARGO_TARGET_DIR="$dir"
+exec "$REAL_CARGO" "$@"

@@ -20,6 +20,10 @@ done
 # Host side of the transcript mounts in sandbox.yaml.
 mkdir -p "$HOME/.agent-transcripts/sandbox/"{claude-projects,codex-sessions,codex-archived-sessions}
 
+# The build-output disk named in sandbox.yaml's additionalDisks. It lives outside the instance,
+# so it survives `limactl delete`. Raw format is sparse; Lima formats it as XFS on first boot.
+[ -d "$LIMA_HOME/_disks/cargo" ] || limactl disk create cargo --size 150GiB --format raw
+
 # Render: inline every provision `file:` reference so the result is self-contained.
 mkdir -p build
 yq '

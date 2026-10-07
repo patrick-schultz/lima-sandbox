@@ -93,3 +93,9 @@ command -v pyright-langserver >/dev/null || npm install -g pyright
 if [ "$(getent passwd "$USER_NAME" | cut -d: -f7)" != "/usr/bin/fish" ]; then
   chsh -s /usr/bin/fish "$USER_NAME"
 fi
+
+# --- build-output disk --------------------------------------------------------
+# Lima mounts the `cargo` additional disk here before provisioning runs. Fail loudly without it:
+# the cargo wrapper refuses to build rather than fall back to a shared target dir.
+mountpoint -q /mnt/lima-cargo || { echo "system.sh: /mnt/lima-cargo is not mounted" >&2; exit 1; }
+install -d -o "$USER_NAME" -g "$(id -gn "$USER_NAME")" /mnt/lima-cargo/target /mnt/lima-cargo/kache
