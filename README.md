@@ -13,7 +13,7 @@ disk for build output, Rosetta binfmt on, no containerd.
 | --- | --- |
 | `sandbox.yaml` | Lima template. Mounts, resources, and provision steps that reference the files below. |
 | `provision/system.sh` | Root provisioning: apt packages, cross gcc, mold, gh, Node, jj, codex, pyright, swap, fish as login shell. |
-| `provision/user.sh` | User provisioning: fish and jj config, rustup (nightly default + stable, x86_64 target), cargo config, cargo wrapper link, kache and its daemon, cargo-binstall, cargo-nextest, uv, claude, agent config symlinks. |
+| `provision/user.sh` | User provisioning: fish and jj config, rustup (nightly default + stable, x86_64 target), cargo config, cargo wrapper link, kache and its daemon, cargo-binstall, cargo-nextest, uv, claude, npm user prefix, humanlayer CLI and its daemon unit, agent config symlinks. |
 | `guest/sandbox-sync` | Installed at `/usr/local/bin/sandbox-sync` in the guest. Regenerates agent config from `~/.agents`. |
 | `guest/sandbox-cargo`, `guest/sandbox-gc-targets` | Installed in `/usr/local/bin`, with `~/.local/bin/cargo` linked to the wrapper. Per-workspace target dirs, see below. |
 | `guest/gh`, `guest/gh-token`, `guest/git-credential-sandbox` | Installed in `/usr/local/bin`, with `/usr/bin/gh` linked to the `gh` wrapper. Per-owner GitHub token selection, see below. |
@@ -76,7 +76,32 @@ Add a `mounts` entry to `sandbox.yaml`, add a `[projects."..."]` trust entry to
 3. `codex login` and follow the device flow.
 4. For each repo owner you work under, create a fine-grained GitHub token for that owner,
    limited to the repos you mount, with Contents, Issues, and Pull requests read/write.
-   Then in the VM: `gh-token add <owner>` and paste it. These are the only credentials in the VM.
+   Then in the VM: `gh-token add <owner>` and paste it.
+5. `humanlayer login` and follow the device flow, then `systemctl --user start humanlayer-daemon`.
+   Skip this if you don't use HumanLayer.
+
+These logins and tokens are the only credentials in the VM.
+
+### HumanLayer daemon
+
+The HumanLayer app runs agent sessions in the VM through a daemon. Its sessions see only the
+mounted directories, like any other agent here.
+
+- Ignore the app's `npm install -g … daemon launch --launch-token …` command. Its launch token
+  expires within a day and is not stored, so a daemon started that way stops for good with the
+  shell. The app's sessions run on the daemon from `humanlayer login` instead.
+- The `humanlayer-daemon.service` user unit runs `humanlayer daemon launch` on the stored login in
+  `~/.humanlayer/riptide/`. It starts at boot only when that login exists. `humanlayer logout`
+  removes it; stop the unit too.
+- The login is used only when the daemon starts: at boot, after a crash, or after a self-update.
+  Each start refreshes and saves it, and a running daemon does not need it again. Logging in again
+  is needed only when a start finds the refresh token no longer works, for example after the VM
+  has been off for a long time. HumanLayer's WorkOS settings decide how long that is. The daemon
+  then logs "Not logged in" and keeps restarting. Run `humanlayer login`, then
+  `systemctl --user restart humanlayer-daemon`.
+- The daemon updates itself with `npm install -g`, then exits for systemd to restart it. That is
+  why `user.sh` points the user's npm prefix at `~/.local`: the system prefix `/usr` is root-only.
+- `journalctl --user -u humanlayer-daemon -f` shows its log.
 
 ### GitHub tokens
 
