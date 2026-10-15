@@ -20,13 +20,27 @@ done
 # Host side of the transcript mounts in sandbox.yaml.
 mkdir -p "$HOME/.agent-transcripts/sandbox/"{claude-projects,codex-sessions,codex-archived-sessions}
 
+# Projects are the writable ~/dev/<name> mounts. Each also gets ~/dev/workspaces/<name>, where
+# its jj workspaces live, whoever creates them (jj, T3 Code, Zed). Mounting per project keeps
+# workspaces of other repos out of the sandbox.
+PROJECTS='.mounts[] | select(.writable == true and (.location | test("^~/dev/[^/]+$")))'
+yq "$PROJECTS | .location" sandbox.yaml | while read -r loc; do
+  mkdir -p "$HOME/dev/workspaces/${loc#\~/dev/}"
+done
+
+# The adopt script runs on the host too, for worktrees that host-side tools create.
+mkdir -p "$HOME/.local/bin"
+ln -sfn "$PWD/guest/jj-adopt-worktree" "$HOME/.local/bin/jj-adopt-worktree"
+
 # The build-output disk named in sandbox.yaml's additionalDisks. It lives outside the instance,
 # so it survives `limactl delete`. Raw format is sparse; Lima formats it as XFS on first boot.
 [ -d "$LIMA_HOME/_disks/cargo" ] || limactl disk create cargo --size 150GiB --format raw
 
-# Render: inline every provision `file:` reference so the result is self-contained.
+# Render: add each project's workspaces mount, and inline every provision `file:` reference so the
+# result is self-contained.
 mkdir -p build
 yq '
+  .mounts += ['"$PROJECTS"' | {"location": (.location | sub("^~/dev/"; "~/dev/workspaces/")), "writable": true}] |
   with(.provision[] | select(has("file") and .mode == "data"); .content = load_str(.file) | del(.file)) |
   with(.provision[] | select(has("file"));                     .script  = load_str(.file) | del(.file))
 ' sandbox.yaml > build/lima.yaml

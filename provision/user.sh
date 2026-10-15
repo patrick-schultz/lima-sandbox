@@ -65,6 +65,12 @@ mkdir -p "$HOME/.local/bin"
 ln -sfn /usr/local/bin/sandbox-cargo "$HOME/.local/bin/cargo"
 sandbox-gc-targets
 
+# Forget jj workspaces whose directory a tool removed, in every mounted jj repo. A failure in one
+# repo must not stop provisioning.
+findmnt -rn -t virtiofs -o TARGET | while read -r dir; do
+  [ ! -d "$dir/.jj" ] || jj-adopt-worktree --gc "$dir" || true
+done
+
 # kache caches rustc outputs across workspaces, so a fresh workspace's target dir fills from hits.
 # Pinned: releases are frequent, and a reboot should not pull in a new one. Bump both together.
 KACHE_VERSION="1.0.0"

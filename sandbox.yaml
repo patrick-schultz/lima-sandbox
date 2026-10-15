@@ -24,6 +24,8 @@ disk: 100GiB
 # Whitelist of host directories. Projects mount at their host path so jj, editor
 # workspaces and cargo lockfiles see identical paths on both sides.
 # ~/.agents holds agent config and skills; it is read-only and mounts at the guest home.
+# bin/apply adds ~/dev/workspaces/<project> for each writable ~/dev/<project> mount here, so a
+# project's workspaces are visible exactly when the project is.
 mountType: virtiofs
 mounts:
 - location: "~/dev/datafusion-sandbox"
@@ -99,6 +101,12 @@ provision:
 - mode: data
   path: /usr/local/bin/sandbox-gc-targets
   file: guest/sandbox-gc-targets
+  owner: "root:root"
+  permissions: 755
+# On the host, bin/apply links ~/.local/bin/jj-adopt-worktree to the same file.
+- mode: data
+  path: /usr/local/bin/jj-adopt-worktree
+  file: guest/jj-adopt-worktree
   owner: "root:root"
   permissions: 755
 - mode: user

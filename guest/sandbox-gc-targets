@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Delete per-workspace cargo target dirs whose workspace no longer exists.
+# Delete cargo target dirs whose cargo workspace no longer exists.
 # Runs at every boot (user provisioning) and on demand; -n lists what would go.
-# A dir is kept when the workspace's parent is missing too, which is what an unmounted project
-# looks like, and when it has no .workspace file, i.e. sandbox-cargo did not make it.
+# A dir is kept when the cargo workspace's parent is missing too, which is what an unmounted
+# project looks like, and when it has no .workspace file, i.e. sandbox-cargo did not make it.
 set -euo pipefail
 ROOT=/mnt/lima-cargo/target
 dry_run=false

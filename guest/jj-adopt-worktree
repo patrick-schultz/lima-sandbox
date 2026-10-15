@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+# Adopt a git worktree that a tool created (T3 Code, Zed) as a colocated jj workspace, park an
+# adopted one, or forget jj workspaces whose directory is gone. Runs on the host and in the guest;
+# needs jj >= 0.46.
+#
+#   jj-adopt-worktree [--name NAME] [PATH]   PATH defaults to $T3CODE_WORKTREE_PATH, then the
+#                                            worktree containing the current directory
+#   jj-adopt-worktree --park [PATH]          same default PATH
+#   jj-adopt-worktree --branch [PATH]        print the tool's branch; same default PATH
+#   jj-adopt-worktree --gc [REPO...]         REPO defaults to the repo of the current directory
+#
+# jj counts a workspace as colocated when its root is a git worktree of the repo, so adopting only
+# adds jj's metadata. `jj workspace add` refuses a populated directory, so the worktree moves aside
+# while jj creates the workspace with empty sparse patterns, which writes no files. Its .jj moves
+# into the worktree, and `jj sparse reset` then keeps every file that already differs, so the
+# tool's checkout and any edits survive as the working-copy commit on top of git HEAD.
+# Replace with `jj git worktree adopt` if jj-vcs/jj#9943 lands.
+#
+# Adopting records the branch the tool checked out as git config branch.<branch>.jj-workspace =
+# PATH, since git HEAD detaches once jj moves past it. `git branch -m` moves that config section,
+# so the record follows T3, which creates the worktree on a temporary t3/<hash> branch and renames
+# it once a name is generated, usually after adoption.
+#
+# Parking deletes the workspace's directory once its work is on the tool's branch. It moves the
+# branch forward onto @, or onto @- when @ is empty and undescribed, so a tool that recreates the
+# worktree from its branch, as T3 does when a thread resumes, gets the work back. It refuses when
+# the branch has moved somewhere that is not an ancestor of the work. Once a fetch has found the
+# PR merged and deleted the branch, the work is in trunk, so it only removes the directory.
+set -euo pipefail
+
+die() { echo "jj-adopt-worktree: $*" >&2; exit 1; }
+
+# Forget workspaces of one repo whose directory is gone. A workspace whose parent is also missing
+# is kept: that is what an unmounted directory looks like from the other side of the sandbox.
+gc_repo() {
+  local repo=$1 name root stale=()
+  while IFS=$'\t' read -r name root; do
+    if [ "$name" != default ] && [ -n "$root" ] && [ ! -e "$root" ] && [ -d "$(dirname "$root")" ]; then
+      stale+=("$name")
+    fi
+  done < <(jj -R "$repo" --ignore-working-copy workspace list -T 'name ++ "\t" ++ root ++ "\n"')
+  [ ${#stale[@]} -eq 0 ] && return 0
+  echo "jj-adopt-worktree: forgetting ${stale[*]} in $repo (directory is gone)"
+  jj -R "$repo" --ignore-working-copy workspace forget "${stale[@]}"
+}
+
+if [ "${1:-}" = --gc ]; then
+  shift
+  [ $# -gt 0 ] || set -- "$(jj root --ignore-working-copy)"
+  status=0
+  for repo in "$@"; do gc_repo "$repo" || status=1; done
+  exit $status
+fi
+
+mode=adopt name=""
+case "${1:-}" in --park | --branch) mode=${1#--}; shift ;; esac
+if [ $mode = adopt ] && [ "${1:-}" = --name ]; then name=${2:?--name needs a value}; shift 2; fi
+target=${1:-${T3CODE_WORKTREE_PATH:-}}
+[ -n "$target" ] || target=$(git rev-parse --show-toplevel) || die "not inside a git worktree"
+if [ $mode = park ] && [ ! -e "$target" ]; then
+  echo "jj-adopt-worktree: $target is already gone"
+  exit 0
+fi
+wt=$(cd "$target" && pwd -P)
+
+[ -f "$wt/.git" ] || die "$wt is not a linked git worktree (no .git file)"
+common=$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir)
+main=$(dirname "$common")
+[ -d "$main/.jj" ] || die "$main is not a jj repo"
+
+# Config keys that record a branch for $wt, one per line.
+recorded_keys() {
+  local entry
+  { git -C "$main" config --null --get-regexp '^branch\..*\.jj-workspace$' || true; } |
+    while IFS= read -r -d '' entry; do
+      if [ "${entry#*$'\n'}" = "$wt" ]; then printf '%s\n' "${entry%%$'\n'*}"; fi
+    done
+}
+
+# The recorded branch, else the one git HEAD is on.
+tool_branch() {
+  local keys
+  keys=$(recorded_keys)
+  case "$keys" in
+    "") git -C "$wt" symbolic-ref --quiet --short HEAD ;;
+    *$'\n'*) die "several branches record $wt: $(tr '\n' ' ' <<<"$keys")" ;;
+    *) keys=${keys#branch.}; echo "${keys%.jj-workspace}" ;;
+  esac
+}
+
+if [ $mode = branch ]; then
+  tool_branch || die "no tool branch recorded for $wt, and git HEAD is detached"
+  exit 0
+fi
+
+if [ $mode = park ]; then
+  [ -e "$wt/.jj" ] || die "$wt is not a jj workspace; nothing records where its work is"
+  branch=$(tool_branch) ||
+    die "no tool branch recorded for $wt; move a bookmark onto its work and remove it by hand"
+  q=(jj -R "$main" --ignore-working-copy)
+  # A fetch that finds the PR merged and its branch deleted abandons the work, which leaves the
+  # workspace stale. Updating it records an operation only when it has to save edits jj had not
+  # snapshotted, in a commit that is no longer @.
+  if ! err=$(jj -R "$wt" log --no-graph -r @ -T '' 2>&1 >/dev/null); then
+    case "$err" in *"working copy is stale"*) ;; *) echo "$err" >&2; exit 1 ;; esac
+    op=$("${q[@]}" op log --no-graph -n 1 -T 'id')
+    jj -R "$wt" --quiet workspace update-stale
+    [ "$("${q[@]}" op log --no-graph -n 1 -T 'id')" = "$op" ] ||
+      die "$wt was stale and had unrecorded edits, which jj saved off @; see \`jj op show\`, then move $branch onto them or remove $wt by hand"
+  fi
+  # Snapshots the working copy, so edits since the last jj command are part of @.
+  tip=$(jj -R "$wt" log --no-graph -r @ \
+    -T 'if(empty && description == "" && parents.len() == 1, "@-", "@")')
+  tip=$(jj -R "$wt" --ignore-working-copy log --no-graph -r "$tip" -T commit_id)
+  at=$("${q[@]}" log --no-graph -r "present(\"$branch\")" -T 'commit_id ++ "\n"')
+  if [ -n "$at" ] && [ -n "$("${q[@]}" log --no-graph -r "$tip & ::\"$branch\"" -T commit_id)" ]; then
+    : # The branch already contains the work.
+  elif [ -z "$at" ] && [ -n "$("${q[@]}" log --no-graph -r "$tip & ::trunk()" -T commit_id)" ]; then
+    branch="" # The work was merged and the branch deleted; recreating it would only add clutter.
+  elif [ -z "$at" ] || [ -n "$("${q[@]}" log --no-graph -r "\"$branch\" & ::$tip" -T commit_id)" ]; then
+    "${q[@]}" --quiet bookmark set "$branch" -r "$tip"
+  else
+    die "$branch has moved off the work in $wt; move it onto ${tip:0:12} or remove $wt by hand"
+  fi
+  cd "$main" # jj fails in a deleted current directory, and T3 runs this inside the worktree.
+  git worktree remove --force "$wt"
+  # Adopting the recreated worktree records the branch again.
+  for key in $(recorded_keys); do git config --unset "$key"; done
+  if [ -n "$branch" ]; then
+    echo "jj-adopt-worktree: parked $wt on $branch (${tip:0:12})"
+  else
+    echo "jj-adopt-worktree: removed $wt; its work is in trunk"
+  fi
+  gc_repo "$main"
+  exit 0
+fi
+
+[ -e "$wt/.jj" ] && { echo "jj-adopt-worktree: $wt is already a jj workspace"; exit 0; }
+head=$(git -C "$wt" rev-parse --verify --quiet HEAD || echo 'root()')
+branch=$(git -C "$wt" symbolic-ref --quiet --short HEAD || true)
+
+if [ -z "$name" ]; then
+  names=$(jj -R "$main" --ignore-working-copy workspace list -T 'name ++ "\n"')
+  base=$(basename "$wt") name=$base n=1
+  while grep -qxF -- "$name" <<<"$names"; do n=$((n + 1)); name="$base-$n"; done
+fi
+
+aside="$wt.jj-adopting"
+[ -e "$aside" ] && die "$aside exists, probably from an interrupted run; move its contents back to $wt"
+mv "$wt" "$aside"
+restore() {
+  if [ -e "$wt" ]; then rm -rf "$wt/.jj"; rmdir "$wt"; fi
+  mv "$aside" "$wt"
+}
+trap restore ERR
+jj -R "$main" --quiet workspace add --no-colocate --sparse-patterns empty \
+  --name "$name" -r "$head" "$wt"
+# Ignore .jj before git can see it, or a tool's `git add -A` commits it.
+printf '/*\n' > "$wt/.jj/.gitignore"
+mv "$wt/.jj" "$aside/.jj"
+rmdir "$wt"
+mv "$aside" "$wt"
+trap - ERR
+
+# Reports every file that already differs as a skipped conflict; that is the point, so stay quiet.
+if ! out=$(jj -R "$wt" sparse reset 2>&1); then
+  echo "$out" >&2
+  die "jj sparse reset failed in $wt; the workspace exists but its sparse patterns are empty"
+fi
+# Replace any record left by an earlier worktree at this path.
+for key in $(recorded_keys); do git -C "$main" config --unset "$key"; done
+[ -z "$branch" ] || git -C "$main" config "branch.$branch.jj-workspace" "$wt"
+echo "jj-adopt-worktree: $wt is now jj workspace '$name' of $main"
+gc_repo "$main"

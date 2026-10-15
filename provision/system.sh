@@ -4,7 +4,7 @@ set -eux -o pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 USER_NAME="{{.User}}"
-JJ_VERSION="0.45.1"
+JJ_VERSION="0.46.0"
 
 # --- apt repositories -------------------------------------------------------
 install -d -m 0755 /etc/apt/keyrings
