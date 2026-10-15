@@ -85,9 +85,10 @@ if ! command -v jj >/dev/null || [ "$(jj --version | awk '{print $2}')" != "$JJ_
 fi
 
 # --- global npm tools ---------------------------------------------------------
-# Codex CLI, and pyright for Claude Code's pyright-lsp plugin.
-command -v codex >/dev/null || npm install -g @openai/codex
+# pyright for Claude Code's pyright-lsp plugin. Codex installs per user (see user.sh) because
+# T3 Code updates it in place as the user; drop the root-owned copy that older VMs have.
 command -v pyright-langserver >/dev/null || npm install -g pyright
+if [ -e /usr/lib/node_modules/@openai/codex ]; then npm uninstall -g @openai/codex; fi
 
 # --- login shell --------------------------------------------------------------
 if [ "$(getent passwd "$USER_NAME" | cut -d: -f7)" != "/usr/bin/fish" ]; then

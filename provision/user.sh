@@ -130,12 +130,16 @@ command -v cargo-nextest >/dev/null || cargo binstall cargo-nextest --no-confirm
 command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
 command -v claude >/dev/null || curl -fsSL https://claude.ai/install.sh | bash
 
-# --- humanlayer daemon -----------------------------------------------------------------
-# User-level npm globals go to ~/.local. The system prefix /usr is root-owned, and the daemon
-# self-updates with `npm install -g` as this user. Root's globals (codex, pyright) stay in /usr.
+# --- user npm globals ------------------------------------------------------------------
+# User-level npm globals go to ~/.local. The system prefix /usr is root-owned, and both tools
+# update themselves with `npm install -g` as this user: the humanlayer daemon, and T3 Code for
+# codex. Root's globals (pyright) stay in /usr. Test the ~/.local paths, not `command -v`, so a
+# leftover copy elsewhere on PATH doesn't skip the install.
 npm config set prefix "$HOME/.local"
-command -v humanlayer >/dev/null || npm install -g @humanlayer/cli@latest
+[ -x "$HOME/.local/bin/codex" ] || npm install -g @openai/codex@latest
+[ -x "$HOME/.local/bin/humanlayer" ] || npm install -g @humanlayer/cli@latest
 
+# --- humanlayer daemon -----------------------------------------------------------------
 # Runs on the stored login from `humanlayer login`, not a launch token: launch tokens expire
 # within a day, and the daemon disables self-update for them under systemd. It self-updates by
 # exiting 75 for systemd to restart it. Without a login the condition fails and nothing starts.
