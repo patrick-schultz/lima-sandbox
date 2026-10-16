@@ -84,6 +84,22 @@ if ! command -v jj >/dev/null || [ "$(jj --version | awk '{print $2}')" != "$JJ_
   rm -rf "$tmp"
 fi
 
+# --- ast-grep -----------------------------------------------------------------
+# Pinned with a checksum: a reboot should not pull in a new release. Bump both together.
+# Only ast-grep is installed: the zip's `sg` alias would shadow /usr/bin/sg (newgrp), or not,
+# depending on PATH order.
+AST_GREP_VERSION="0.51.0"
+AST_GREP_SHA256="73af0ebe5958acee012754a5b2826a186580ef83333092408a7a01096fc30b8b"
+if [ "$(/usr/local/bin/ast-grep --version 2>/dev/null | awk '{print $2}')" != "$AST_GREP_VERSION" ]; then
+  tmp=$(mktemp -d)
+  curl -fsSL -o "$tmp/ast-grep.zip" \
+    "https://github.com/ast-grep/ast-grep/releases/download/${AST_GREP_VERSION}/app-aarch64-unknown-linux-gnu.zip"
+  echo "$AST_GREP_SHA256  $tmp/ast-grep.zip" | sha256sum -c -
+  unzip -q "$tmp/ast-grep.zip" ast-grep -d "$tmp"
+  install -m 0755 "$tmp/ast-grep" /usr/local/bin/ast-grep
+  rm -rf "$tmp"
+fi
+
 # --- global npm tools ---------------------------------------------------------
 # pyright for Claude Code's pyright-lsp plugin. Codex installs per user (see user.sh) because
 # T3 Code updates it in place as the user; drop the root-owned copy that older VMs have.

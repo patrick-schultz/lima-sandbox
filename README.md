@@ -12,7 +12,7 @@ disk for build output, Rosetta binfmt on, no containerd.
 | Path | Purpose |
 | --- | --- |
 | `sandbox.yaml` | Lima template. Mounts, resources, and provision steps that reference the files below. |
-| `provision/system.sh` | Root provisioning: apt packages, cross gcc, mold, gh, Node, jj, pyright, swap, fish as login shell. |
+| `provision/system.sh` | Root provisioning: apt packages, cross gcc, mold, gh, Node, jj, ast-grep, pyright, swap, fish as login shell. |
 | `provision/user.sh` | User provisioning: fish and jj config, rustup (nightly default + stable, x86_64 target), cargo config, cargo wrapper link, kache and its daemon, cargo-binstall, cargo-nextest, uv, claude, npm user prefix, codex, humanlayer CLI and its daemon unit, agent config symlinks. |
 | `guest/sandbox-sync` | Installed at `/usr/local/bin/sandbox-sync` in the guest. Regenerates agent config from `~/.agents`. |
 | `guest/sandbox-cargo`, `guest/sandbox-gc-targets` | Installed in `/usr/local/bin`, with `~/.local/bin/cargo` linked to the wrapper. Per-cargo-workspace target dirs, see below. |
