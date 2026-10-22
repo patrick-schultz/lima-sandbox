@@ -62,6 +62,10 @@ ssh lima-sandbox          # for Zed, T3 Code, or plain ssh
 limactl stop sandbox
 ```
 
+`ssh lima-sandbox` always uses port 60022 (`ssh.localPort` in `sandbox.yaml`). By default Lima
+picks a new port on every start, and T3 Code keeps the port it saw when its environment was created,
+so it could not reconnect after a restart.
+
 Mounted projects appear at their host paths, e.g. `/Users/pschulz/dev/datafusion-sandbox`, and so do
 their workspaces under `/Users/pschulz/dev/workspaces/`. Cargo builds go to a per-cargo-workspace dir
 under `/mnt/lima-cargo/target`, never to `target/` on the mount.

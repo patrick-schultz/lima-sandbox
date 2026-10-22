@@ -66,6 +66,9 @@ vmOpts:
       binfmt: true
 
 ssh:
+  # Fixed, not Lima's default of a new random port per start: T3 Code stores the port it resolved
+  # for `lima-sandbox` when the environment is created, and cannot reconnect once it changes.
+  localPort: 60022
   forwardAgent: false
 
 provision:
