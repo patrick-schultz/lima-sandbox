@@ -35,7 +35,7 @@ ws=$(dirname "$manifest_file")
 [ -d "$ROOT" ] || { echo "cargo: $ROOT is missing; is the cargo disk mounted?" >&2; exit 1; }
 dir="$ROOT/$(basename "$ws")-$(printf '%s' "$ws" | sha256sum | cut -c1-8)${SANDBOX_TARGET_SUFFIX:+-$SANDBOX_TARGET_SUFFIX}"
 mkdir -p "$dir"
-# sandbox-gc-targets deletes the dir once this workspace is gone.
+# sandbox-gc deletes the dir once this workspace is gone.
 [ "$(cat "$dir/.workspace" 2>/dev/null)" = "$ws" ] || printf '%s\n' "$ws" > "$dir/.workspace"
 
 export CARGO_TARGET_DIR="$dir"

@@ -101,9 +101,15 @@ provision:
   file: guest/sandbox-cargo
   owner: "root:root"
   permissions: 755
+# user.sh links ~/.local/bin/uv here.
 - mode: data
-  path: /usr/local/bin/sandbox-gc-targets
-  file: guest/sandbox-gc-targets
+  path: /usr/local/bin/sandbox-uv
+  file: guest/sandbox-uv
+  owner: "root:root"
+  permissions: 755
+- mode: data
+  path: /usr/local/bin/sandbox-gc
+  file: guest/sandbox-gc
   owner: "root:root"
   permissions: 755
 # On the host, bin/apply links ~/.local/bin/jj-adopt-worktree to the same file.

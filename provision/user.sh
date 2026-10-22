@@ -12,6 +12,9 @@ set -g fish_greeting
 set -gx EDITOR vim
 # ~/.local/bin first, so its cargo wrapper wins over the rustup proxy in ~/.cargo/bin.
 fish_add_path --global --move "$HOME/.local/bin" "$HOME/.cargo/bin"
+# uv's cache shares the XFS disk with the venvs from the uv wrapper, so installs are reflink clones.
+set -gx UV_CACHE_DIR /mnt/lima-cargo/uv-cache
+set -gx UV_LINK_MODE clone
 EOF
 
 # --- jj identity ------------------------------------------------------------------
@@ -63,7 +66,7 @@ done
 # here sets target-dir. Builds never land in target/ on a mount, where host builds live.
 mkdir -p "$HOME/.local/bin"
 ln -sfn /usr/local/bin/sandbox-cargo "$HOME/.local/bin/cargo"
-sandbox-gc-targets
+sandbox-gc
 # Give what the cleanup freed back to the host now rather than at the next hourly trim.
 sudo systemctl start --no-block fstrim.service
 
@@ -129,7 +132,13 @@ command -v cargo-binstall >/dev/null || curl -L --proto '=https' --tlsv1.2 -sSf 
 command -v cargo-nextest >/dev/null || cargo binstall cargo-nextest --no-confirm
 
 # --- uv, claude ----------------------------------------------------------------------
-command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
+# The real uv lives in ~/.local/opt/uv, since ~/.local/bin/uv is the wrapper that keeps venvs off
+# the mount. uvx runs tools, not projects, so it links straight to the real one. `ln -f` replaces
+# the binaries an older VM installed in ~/.local/bin.
+[ -x "$HOME/.local/opt/uv/uv" ] || curl -LsSf https://astral.sh/uv/install.sh \
+  | env UV_INSTALL_DIR="$HOME/.local/opt/uv" UV_NO_MODIFY_PATH=1 sh
+ln -sfn /usr/local/bin/sandbox-uv "$HOME/.local/bin/uv"
+ln -sfn "$HOME/.local/opt/uv/uvx" "$HOME/.local/bin/uvx"
 command -v claude >/dev/null || curl -fsSL https://claude.ai/install.sh | bash
 
 # --- user npm globals ------------------------------------------------------------------
@@ -158,6 +167,7 @@ ConditionPathExists=%h/.humanlayer/riptide/workos-session-prod.json
 Type=simple
 WorkingDirectory=%h
 Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+Environment=UV_CACHE_DIR=/mnt/lima-cargo/uv-cache UV_LINK_MODE=clone
 ExecStart=%h/.local/bin/humanlayer daemon launch
 Restart=always
 RestartSec=5s

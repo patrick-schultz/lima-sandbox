@@ -18,3 +18,7 @@ it from that branch. The reverse of creating and Adopting it.
 
 **Cargo workspace**
 A Rust cargo workspace. Always qualified, since a Workspace usually contains one.
+
+**uv workspace**
+A Python project managed by uv, together with its member projects. Always qualified, since a
+Workspace may contain one.

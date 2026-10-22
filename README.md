@@ -13,9 +13,9 @@ disk for build output, Rosetta binfmt on, no containerd.
 | --- | --- |
 | `sandbox.yaml` | Lima template. Mounts, resources, and provision steps that reference the files below. |
 | `provision/system.sh` | Root provisioning: apt packages, cross gcc, mold, gh, Node, jj, ast-grep, pyright, swap, fish as login shell. |
-| `provision/user.sh` | User provisioning: fish and jj config, rustup (nightly default + stable, x86_64 target), cargo config, cargo wrapper link, kache and its daemon, cargo-binstall, cargo-nextest, uv, claude, npm user prefix, codex, humanlayer CLI and its daemon unit, agent config symlinks. |
+| `provision/user.sh` | User provisioning: fish and jj config, rustup (nightly default + stable, x86_64 target), cargo config, cargo wrapper link, kache and its daemon, cargo-binstall, cargo-nextest, uv and the uv wrapper link, claude, npm user prefix, codex, humanlayer CLI and its daemon unit, agent config symlinks. |
 | `guest/sandbox-sync` | Installed at `/usr/local/bin/sandbox-sync` in the guest. Regenerates agent config from `~/.agents`. |
-| `guest/sandbox-cargo`, `guest/sandbox-gc-targets` | Installed in `/usr/local/bin`, with `~/.local/bin/cargo` linked to the wrapper. Per-cargo-workspace target dirs, see below. |
+| `guest/sandbox-cargo`, `guest/sandbox-uv`, `guest/sandbox-gc` | Installed in `/usr/local/bin`, with `~/.local/bin/cargo` and `~/.local/bin/uv` linked to the wrappers. Per-cargo-workspace target dirs and per-uv-workspace venvs, see below. |
 | `guest/jj-adopt-worktree` | Installed in `/usr/local/bin`, and linked at `~/.local/bin` on the host by `bin/apply`. Adopts tool-made git worktrees as jj workspaces, see below. |
 | `guest/gh`, `guest/gh-token`, `guest/git-credential-sandbox` | Installed in `/usr/local/bin`, with `/usr/bin/gh` linked to the `gh` wrapper. Per-owner GitHub token selection, see below. |
 | `bin/apply` | Renders the template and creates or updates the VM. Adds a workspaces mount per project, creates the `cargo` disk, and adds the ssh `Include` on the host. |
@@ -185,13 +185,13 @@ A shared target dir is unsafe for several workspaces of one project. Cargo's out
 depend on the checkout path, so one workspace's build overwrites the other's binaries, and an
 agent ends up testing someone else's code. That happened to datafusion-sandbox's ws1 and ws2.
 
-The wrapper writes the cargo workspace path to `.workspace` in each dir. `sandbox-gc-targets` runs
-at boot and deletes dirs whose cargo workspace is gone, such as removed workspaces; `-n` lists them
-without deleting. It keeps a dir when the cargo workspace's parent is also missing, as with an
-unmounted project.
+The wrapper writes the cargo workspace path to `.workspace` in each dir. `sandbox-gc` runs at boot
+and deletes dirs whose cargo workspace is gone, such as removed workspaces; `-n` lists them without
+deleting. It keeps a dir when the cargo workspace's parent is also missing, as with an unmounted
+project. It cleans up venvs the same way.
 
-`/mnt/lima-cargo` is the `cargo` Lima disk: sparse, XFS with reflinks, and kept by
-`limactl delete`. `limactl disk resize cargo --size <N>GiB` grows it while the VM is stopped.
+`/mnt/lima-cargo` is the `cargo` Lima disk, the build-output disk: target dirs, kache's store,
+venvs, and uv's cache. It is sparse, XFS with reflinks, and kept by `limactl delete`. `limactl disk resize cargo --size <N>GiB` grows it while the VM is stopped.
 
 Both disk images are sparse files on the host and shrink only when the guest trims freed blocks.
 The root disk is mounted `discard`. The cargo disk is trimmed hourly by `fstrim.timer`, whose
@@ -221,6 +221,28 @@ same XFS disk as the target dirs, so restores are reflink clones. It is capped a
   warning is a false alarm here: it compares against the cargo workspace on the mount, not
   `CARGO_TARGET_DIR`.
 - mold's version is not part of the key; set `KACHE_KEY_SALT` in the config when bumping mold.
+
+### Python venvs
+
+Each uv workspace's venv lives at `/mnt/lima-cargo/venv/<basename>-<hash of path>/env`, not in
+`.venv` on the mount. The `uv` wrapper picks the dir from `uv workspace dir`, honouring `--project`
+and `--directory`, and exports `UV_PROJECT_ENVIRONMENT`; an existing one wins. `uv pip` ignores
+that variable, so for `uv pip` the wrapper also sets `VIRTUAL_ENV` unless it is set. Outside a uv
+workspace the wrapper runs the real uv in `~/.local/opt/uv` unchanged. `uvx` links straight to it.
+
+- A `.venv` on the mount lands on the host disk. It was a full 1.4 GiB copy per workspace, since
+  uv cannot hardlink from its cache on another filesystem.
+- A main checkout's `.venv` belongs to the host: macOS uv made it, and the guest must not replace
+  it with a Linux one. The wrapper never touches `.venv`, so it does not.
+- uv's cache is `/mnt/lima-cargo/uv-cache` with `UV_LINK_MODE=clone`, set in the fish config and
+  the HumanLayer unit, so a venv is reflink clones of the cache. A second datafusion-sandbox venv
+  takes about 26 MiB.
+- There is no `.venv` symlink, so nothing finds the venv by that path. Run tools with `uv run`.
+  `uv run pyright` puts the venv's `python3` first on PATH, which is how pyright finds the
+  dependencies. Plain `pyright` reports every third-party import as missing.
+
+The wrapper writes the uv workspace path to `.workspace` next to `env`, and `sandbox-gc` removes the
+dir once that path is gone.
 
 ### Linking and memory
 
@@ -255,4 +277,5 @@ has no AVX-512, and timings under it mean nothing.
 ## Rebuilding from scratch
 
 `limactl delete sandbox && bin/apply`. This loses agent logins, the GitHub token, and the cargo
-registry cache. Target dirs survive on the `cargo` disk; `limactl disk delete cargo` drops them too.
+registry cache. Target dirs, venvs, and the kache and uv caches survive on the `cargo` disk;
+`limactl disk delete cargo` drops them too.

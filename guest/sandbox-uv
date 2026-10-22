@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# uv wrapper: keeps every uv workspace's venv on the build-output disk, not in .venv on the mount.
+# A .venv on the mount lands on the host disk, as a full copy since the uv cache is on another
+# filesystem, and in a main checkout it is the host's own macOS venv. user.sh links ~/.local/bin/uv
+# here; the real uv lives in ~/.local/opt/uv.
+#
+# The venv is /mnt/lima-cargo/venv/<root basename>-<hash of root path>/env, where root is what
+# `uv workspace dir` prints. A UV_PROJECT_ENVIRONMENT that is already set wins. `uv pip` ignores
+# UV_PROJECT_ENVIRONMENT, so it also gets VIRTUAL_ENV, unless that is set too.
+set -euo pipefail
+REAL_UV="$HOME/.local/opt/uv/uv"
+ROOT=/mnt/lima-cargo/venv
+
+[ -z "${UV_PROJECT_ENVIRONMENT:-}" ] || exec "$REAL_UV" "$@"
+
+# workspace dir must look where the real command looks. Arguments after `--` belong to the
+# program being run, not to uv.
+location=()
+command=
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case "${args[i]}" in
+    --project | --directory) location+=("${args[i]}" "${args[i+1]:-}"); i=$((i + 1)) ;;
+    --project=* | --directory=*) location+=("${args[i]}") ;;
+    --) break ;;
+    -*) ;;
+    *) [ -n "$command" ] || command=${args[i]} ;;
+  esac
+done
+
+# Outside a uv workspace (uv tool, uv python, a bare script, ...) there is nothing to place.
+ws=$("$REAL_UV" workspace dir "${location[@]}" 2>/dev/null) || exec "$REAL_UV" "$@"
+
+[ -d "$ROOT" ] || { echo "uv: $ROOT is missing; is the cargo disk mounted?" >&2; exit 1; }
+dir="$ROOT/$(basename "$ws")-$(printf '%s' "$ws" | sha256sum | cut -c1-8)"
+mkdir -p "$dir"
+# sandbox-gc deletes the dir once this uv workspace is gone. The marker sits next to the venv,
+# not in it, because uv replaces the venv when the Python version changes.
+[ "$(cat "$dir/.workspace" 2>/dev/null)" = "$ws" ] || printf '%s\n' "$ws" > "$dir/.workspace"
+
+export UV_PROJECT_ENVIRONMENT="$dir/env"
+[ "$command" != pip ] || export VIRTUAL_ENV="${VIRTUAL_ENV:-$UV_PROJECT_ENVIRONMENT}"
+exec "$REAL_UV" "$@"

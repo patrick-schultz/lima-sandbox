@@ -101,8 +101,9 @@ if [ "$(/usr/local/bin/ast-grep --version 2>/dev/null | awk '{print $2}')" != "$
 fi
 
 # --- global npm tools ---------------------------------------------------------
-# pyright for Claude Code's pyright-lsp plugin. Codex installs per user (see user.sh) because
-# T3 Code updates it in place as the user; drop the root-owned copy that older VMs have.
+# pyright for agents' `uv run pyright`, which puts the project venv's python3 first on PATH.
+# Codex installs per user (see user.sh) because T3 Code updates it in place as the user; drop the
+# root-owned copy that older VMs have.
 command -v pyright-langserver >/dev/null || npm install -g pyright
 if [ -e /usr/lib/node_modules/@openai/codex ]; then npm uninstall -g @openai/codex; fi
 
@@ -113,9 +114,12 @@ fi
 
 # --- build-output disk --------------------------------------------------------
 # Lima mounts the `cargo` additional disk here before provisioning runs. Fail loudly without it:
-# the cargo wrapper refuses to build rather than fall back to a shared target dir.
+# the cargo and uv wrappers refuse to run rather than fall back to the mount.
 mountpoint -q /mnt/lima-cargo || { echo "system.sh: /mnt/lima-cargo is not mounted" >&2; exit 1; }
-install -d -o "$USER_NAME" -g "$(id -gn "$USER_NAME")" /mnt/lima-cargo/target /mnt/lima-cargo/kache
+install -d -o "$USER_NAME" -g "$(id -gn "$USER_NAME")" \
+  /mnt/lima-cargo/target /mnt/lima-cargo/kache /mnt/lima-cargo/venv /mnt/lima-cargo/uv-cache
+# Renamed to sandbox-gc when it started cleaning up venvs too.
+rm -f /usr/local/bin/sandbox-gc-targets
 
 # The disk images are sparse files on the host, and they only shrink when the guest trims freed
 # blocks. Ubuntu's fstrim.service trims only what /etc/fstab lists, and Lima mounts this disk

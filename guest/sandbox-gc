@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Delete build output whose cargo workspace or uv workspace no longer exists: cargo target dirs
+# from sandbox-cargo and venvs from sandbox-uv. Runs at every boot (user provisioning) and on
+# demand; -n lists what would go.
+# A dir is kept when the workspace's parent is missing too, which is what an unmounted project
+# looks like, and when it has no .workspace file, i.e. neither wrapper made it.
+set -euo pipefail
+dry_run=false
+[ "${1:-}" = "-n" ] && dry_run=true
+
+for root in /mnt/lima-cargo/target /mnt/lima-cargo/venv; do
+  [ -d "$root" ] || continue
+  for dir in "$root"/*/; do
+    dir=${dir%/}
+    [ -f "$dir/.workspace" ] || continue
+    ws=$(head -n1 "$dir/.workspace")
+    [ -n "$ws" ] && [ ! -e "$ws" ] && [ -d "$(dirname "$ws")" ] || continue
+    echo "sandbox-gc: removing $dir ($ws is gone)"
+    $dry_run || rm -rf -- "$dir"
+  done
+done
