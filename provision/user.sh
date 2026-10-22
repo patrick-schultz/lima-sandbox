@@ -64,6 +64,8 @@ done
 mkdir -p "$HOME/.local/bin"
 ln -sfn /usr/local/bin/sandbox-cargo "$HOME/.local/bin/cargo"
 sandbox-gc-targets
+# Give what the cleanup freed back to the host now rather than at the next hourly trim.
+sudo systemctl start --no-block fstrim.service
 
 # Forget jj workspaces whose directory a tool removed, in every mounted jj repo. A failure in one
 # repo must not stop provisioning.
