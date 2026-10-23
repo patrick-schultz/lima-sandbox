@@ -35,7 +35,10 @@ via symlinks, so the sandbox sees the same base config as the host.
 | `~/.agents/skills/` | `~/.claude/skills` symlink, and one symlink per skill in `~/.codex/skills/`. |
 | `~/.agents/claude/scripts/` | `~/.claude/scripts` symlink, for the jj worktree hooks. |
 
-After editing any of these on the host, run `sandbox-sync` inside the VM. It also runs at boot.
+`sandbox-sync` regenerates these at boot and every 10 minutes from a user timer
+(`systemctl --user list-timers sandbox-sync.timer`). To pick up a host edit sooner, run
+`sandbox-sync` inside the VM. Each run overwrites the guest files, so an edit made inside the VM
+lasts at most 10 minutes; make it on the host instead.
 
 ## Agent transcripts
 
