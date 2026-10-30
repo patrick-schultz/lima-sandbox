@@ -190,8 +190,12 @@ agent ends up testing someone else's code. That happened to datafusion-sandbox's
 
 The wrapper writes the cargo workspace path to `.workspace` in each dir. `sandbox-gc` runs at boot
 and deletes dirs whose cargo workspace is gone, such as removed workspaces; `-n` lists them without
-deleting. It keeps a dir when the cargo workspace's parent is also missing, as with an unmounted
-project. It cleans up venvs the same way.
+deleting. It keeps a dir when the cargo workspace is under `/Users` and the nearest directory above
+it that exists is not on a virtiofs mount, as with an unmounted project. It used to keep a dir
+whenever the workspace's parent was missing too, so a cargo or uv workspace nested in a removed
+worktree, such as `<worktree>/python`, was never cleaned up. It cleans
+up venvs the same way. It only runs at boot, so run `sandbox-gc` by hand after removing
+workspaces on a VM that has been up for a while.
 
 `/mnt/lima-cargo` is the `cargo` Lima disk, the build-output disk: target dirs, kache's store,
 venvs, and uv's cache. It is sparse, XFS with reflinks, and kept by `limactl delete`. `limactl disk resize cargo --size <N>GiB` grows it while the VM is stopped.

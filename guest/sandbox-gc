@@ -2,11 +2,26 @@
 # Delete build output whose cargo workspace or uv workspace no longer exists: cargo target dirs
 # from sandbox-cargo and venvs from sandbox-uv. Runs at every boot (user provisioning) and on
 # demand; -n lists what would go.
-# A dir is kept when the workspace's parent is missing too, which is what an unmounted project
-# looks like, and when it has no .workspace file, i.e. neither wrapper made it.
+# A dir is kept when it has no .workspace file, i.e. neither wrapper made it, and when its
+# workspace is a host path whose mount is down, which is what an unmounted project looks like.
 set -euo pipefail
 dry_run=false
 [ "${1:-}" = "-n" ] && dry_run=true
+
+# Whether the workspace at $1 was deleted, rather than hidden by an unmounted project. Host paths
+# live under /Users, so there the nearest existing directory above the workspace must be on a
+# virtiofs mount. Checking only the parent kept workspaces nested inside a removed worktree, such
+# as <worktree>/python, forever. Anywhere else, such as /tmp, a missing workspace is gone.
+# -e is also false when a directory on the way can't be searched or a symlink dangles, so the
+# directory found must be searchable and not a symlink, which could point into an unmounted project.
+gone() {
+  local ws=$1 up
+  [ -n "$ws" ] && [ ! -e "$ws" ] && [ ! -L "$ws" ] || return 1
+  up=$(dirname "$ws")
+  until [ -e "$up" ] || [ -L "$up" ]; do up=$(dirname "$up"); done
+  [ ! -L "$up" ] && [ -x "$up" ] || return 1
+  case $ws in /Users/*) [ "$(findmnt -n -o FSTYPE -T "$up")" = virtiofs ] ;; esac
+}
 
 for root in /mnt/lima-cargo/target /mnt/lima-cargo/venv; do
   [ -d "$root" ] || continue
@@ -14,7 +29,7 @@ for root in /mnt/lima-cargo/target /mnt/lima-cargo/venv; do
     dir=${dir%/}
     [ -f "$dir/.workspace" ] || continue
     ws=$(head -n1 "$dir/.workspace")
-    [ -n "$ws" ] && [ ! -e "$ws" ] && [ -d "$(dirname "$ws")" ] || continue
+    gone "$ws" || continue
     echo "sandbox-gc: removing $dir ($ws is gone)"
     $dry_run || rm -rf -- "$dir"
   done
