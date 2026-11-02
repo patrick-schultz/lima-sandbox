@@ -201,10 +201,10 @@ workspaces on a VM that has been up for a while.
 venvs, and uv's cache. It is sparse, XFS with reflinks, and kept by `limactl delete`. `limactl disk resize cargo --size <N>GiB` grows it while the VM is stopped.
 
 Both disk images are sparse files on the host and shrink only when the guest trims freed blocks.
-The root disk is mounted `discard`. The cargo disk is trimmed hourly by `fstrim.timer`, whose
-service `system.sh` extends to cover it, since Lima mounts it without an fstab entry, and once
-after the boot cleanup. Before that it was never trimmed, and its image held 63 GiB of the host
-disk for 34 GiB of data. `du -sh ~/.lima/_disks/cargo` on the host shows its real size.
+The root disk is mounted `discard` and also gets Ubuntu's weekly `fstrim.timer`. The cargo disk is
+trimmed hourly by `lima-cargo-trim.timer`, a separate unit from `system.sh` because Lima mounts it
+without an fstab entry, and once after the boot cleanup. Before that it was never trimmed, and its
+image held 63 GiB of the host disk for 34 GiB of data. `du -sh ~/.lima/_disks/cargo` on the host shows its real size.
 
 For rust-analyzer, set `cargo.targetDir = true` in the editor or project config. It then checks
 into a `rust-analyzer` subdir and does not wait on the build-dir lock behind agent builds.
