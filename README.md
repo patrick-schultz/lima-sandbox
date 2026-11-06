@@ -12,7 +12,7 @@ disk for build output, Rosetta binfmt on, no containerd.
 | Path | Purpose |
 | --- | --- |
 | `sandbox.yaml` | Lima template. Mounts, resources, and provision steps that reference the files below. |
-| `provision/system.sh` | Root provisioning: apt packages, cross gcc, mold, gh, Node, jj, ast-grep, pyright, swap, fish as login shell. |
+| `provision/system.sh` | Root provisioning: apt packages, cross gcc, mold, gh, Node, OpenJDK 21, jj, ast-grep, pyright, swap, fish as login shell. |
 | `provision/user.sh` | User provisioning: fish and jj config, rustup (nightly default + stable, x86_64 target), cargo config, cargo wrapper link, kache and its daemon, cargo-binstall, cargo-nextest, uv and the uv wrapper link, claude, npm user prefix, codex, humanlayer CLI and its daemon unit, agent config symlinks. |
 | `guest/sandbox-sync` | Installed at `/usr/local/bin/sandbox-sync` in the guest. Regenerates agent config from `~/.agents`. |
 | `guest/sandbox-cargo`, `guest/sandbox-uv`, `guest/sandbox-gc` | Installed in `/usr/local/bin`, with `~/.local/bin/cargo` and `~/.local/bin/uv` linked to the wrappers. Per-cargo-workspace target dirs and per-uv-workspace venvs, see below. |
@@ -250,6 +250,19 @@ workspace the wrapper runs the real uv in `~/.local/opt/uv` unchanged. `uvx` lin
 
 The wrapper writes the uv workspace path to `.workspace` next to `env`, and `sandbox-gc` removes the
 dir once that path is gone.
+
+### JVM
+
+OpenJDK 21, arm64, from Ubuntu's apt archive (`openjdk-21-jdk-headless`), for running hail through
+`uv run`. 21 matches hail main. `java` is found through `/usr/bin/java`; nothing sets `JAVA_HOME`.
+The JDK rather than the JRE is there for `jcmd`, `jstack`, `jmap` and `jfr`.
+
+- `hl.identity_by_descent` fails: hail ships its native `libhail.so` only for x86_64 Linux, and
+  that is the only operation that loads it. `hl.init`, reading tables, and `to_spark` do not.
+- hail 0.2.139 warns on any Java other than 11 and runs anyway. Spark 3.5 supports 21 only
+  unofficially; its known gap is the Arrow paths (`toPandas` with Arrow, pandas UDFs).
+- Don't use an x86_64 JVM under Rosetta to get `libhail.so`: it uses AVX, which gave SIGILL under
+  Rosetta on macOS (hail#14000), and x86 JVMs under Rosetta have a history of intermittent crashes.
 
 ### Linking and memory
 

@@ -28,6 +28,7 @@ fi
 # The diversion must exist before apt installs gh, and it survives gh upgrades.
 dpkg-divert --local --rename --divert /usr/bin/gh.real --add /usr/bin/gh
 
+# openjdk-21 is the native arm64 JVM for running hail; see "JVM" in the README.
 apt-get update
 apt-get install -y --no-install-recommends \
   build-essential cmake pkg-config libssl-dev clang lld mold \
@@ -35,7 +36,8 @@ apt-get install -y --no-install-recommends \
   git gh curl ca-certificates gnupg unzip \
   fish tmux vim ripgrep fd-find jq \
   python3 python3-venv \
-  nodejs
+  nodejs \
+  openjdk-21-jdk-headless
 
 ln -sfn "$(command -v fdfind)" /usr/local/bin/fd
 ln -sfn /usr/local/bin/gh /usr/bin/gh
