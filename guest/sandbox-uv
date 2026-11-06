@@ -5,13 +5,20 @@
 # here; the real uv lives in ~/.local/opt/uv.
 #
 # The venv is /mnt/lima-cargo/venv/<root basename>-<hash of root path>/env, where root is what
-# `uv workspace dir` prints. A UV_PROJECT_ENVIRONMENT that is already set wins. `uv pip` ignores
+# `uv workspace dir` prints. A UV_PROJECT_ENVIRONMENT set by hand wins; one under the venv root was
+# placed by an outer call of this wrapper, so this call places its own. `uv pip` ignores
 # UV_PROJECT_ENVIRONMENT, so it also gets VIRTUAL_ENV, unless that is set too.
 set -euo pipefail
 REAL_UV="$HOME/.local/opt/uv/uv"
 ROOT=/mnt/lima-cargo/venv
 
-[ -z "${UV_PROJECT_ENVIRONMENT:-}" ] || exec "$REAL_UV" "$@"
+# A UV_PROJECT_ENVIRONMENT under $ROOT was placed by an outer call of this wrapper and reached us
+# through `uv run`'s environment, so place this call's own workspace venv. Any other value was set
+# by hand and wins.
+case "${UV_PROJECT_ENVIRONMENT:-}" in
+  "" | "$ROOT"/*) ;;
+  *) exec "$REAL_UV" "$@" ;;
+esac
 
 # workspace dir must look where the real command looks. Arguments after `--` belong to the
 # program being run, not to uv.
